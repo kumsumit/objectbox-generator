@@ -11,7 +11,7 @@ environment:
 
 dependencies:
   objectbox:
-    git: https://github.com/kumsumit/objectbox.dart
+    git: https://github.com/kumsumit/objectbox.git
   # https://pub.dev/packages/analyzer/changelog
   # source_gen 4.0.1 requires 8.1.1
   analyzer: ^13.3.0
