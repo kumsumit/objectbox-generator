@@ -1,21 +1,21 @@
 import 'dart:async';
-import 'dart:io';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:build/build.dart';
 import 'package:collection/collection.dart';
+import 'package:dart_style/dart_style.dart';
 import 'package:glob/glob.dart';
+import 'package:objectbox/internal.dart';
 import 'package:objectbox_generator/src/analysis/analysis.dart';
 import 'package:objectbox_generator/src/builder_dirs.dart';
 import 'package:path/path.dart' as path;
-import 'package:objectbox/internal.dart';
-import 'package:dart_style/dart_style.dart';
-import 'package:source_gen/source_gen.dart';
 import 'package:pubspec_parse/pubspec_parse.dart';
+import 'package:source_gen/source_gen.dart';
 
+import 'code_chunks.dart';
 import 'config.dart';
 import 'entity_resolver.dart';
-import 'code_chunks.dart';
 
 /// CodeBuilder collects all '.objectbox.info' files created by EntityResolver and generates objectbox-model.json and
 /// objectbox_model.dart
@@ -29,13 +29,17 @@ class CodeBuilder extends Builder {
 
   @override
   late final buildExtensions = {
+    // lib/$lib$ and test/$test$ are placeholder files of build_runner which are
+    // used as there is no clear primary input file for this builder.
     r'$lib$': [path.join(_config.outDirLib, _config.codeFile)],
-    r'$test$': [path.join(_config.outDirTest, _config.codeFile)]
+    r'$test$': [path.join(_config.outDirTest, _config.codeFile)],
   };
 
   @override
   FutureOr<void> build(BuildStep buildStep) async {
-    final builderDirs = BuilderDirs(buildStep, _config);
+    // This is only called twice, once with path lib/$lib$ and once with test/$test$
+    final inputFilePath = buildStep.inputId.path;
+    final builderDirs = BuilderDirs(inputFilePath, _config);
 
     // build() will be called only twice, once for the `lib` directory and once for the `test` directory
     // map from file name to a 'json' representation of entities
@@ -71,22 +75,33 @@ class CodeBuilder extends Builder {
     }
 
     // generate binding code
-    updateCode(model, files.keys.toList(growable: false), buildStep,
-        builderDirs, pubspec);
+    updateCode(
+      model,
+      files.keys.toList(growable: false),
+      buildStep,
+      builderDirs,
+      pubspec,
+    );
 
     await ObjectBoxAnalysis().sendBuildEvent(pubspec);
   }
 
-  Future<ModelInfo> updateModel(List<ModelEntity> entities, BuildStep buildStep,
-      BuilderDirs builderDirs) async {
+  Future<ModelInfo> updateModel(
+    List<ModelEntity> entities,
+    BuildStep buildStep,
+    BuilderDirs builderDirs,
+  ) async {
     // load an existing model or initialize a new one
     ModelInfo model;
     final jsonId = AssetId(
-        buildStep.inputId.package, '${builderDirs.out}/${_config.jsonFile}');
+      buildStep.inputId.package,
+      '${builderDirs.out}/${_config.jsonFile}',
+    );
     if (await buildStep.canRead(jsonId)) {
       log.info('Using model: ${jsonId.path}');
-      model =
-          ModelInfo.fromMap(json.decode(await buildStep.readAsString(jsonId)));
+      model = ModelInfo.fromMap(
+        json.decode(await buildStep.readAsString(jsonId)),
+      );
     } else {
       log.warning('Creating model: ${jsonId.path}');
       model = ModelInfo.empty();
@@ -100,8 +115,9 @@ class CodeBuilder extends Builder {
     // write model info
     // Can't use output, it's removed before each build, though writing to FS is explicitly forbidden by package:build.
     // await buildStep.writeAsString(jsonId, JsonEncoder.withIndent('  ').convert(model.toMap()));
-    await File(jsonId.path)
-        .writeAsString(JsonEncoder.withIndent('  ').convert(model.toMap()));
+    await File(
+      jsonId.path,
+    ).writeAsString(JsonEncoder.withIndent('  ').convert(model.toMap()));
 
     return model;
   }
@@ -122,8 +138,9 @@ class CodeBuilder extends Builder {
 
     if (!outDir.path.startsWith(rootDir.path)) {
       throw InvalidGenerationSourceError(
-          'configured output_dir ${outDir.path} is not a '
-          'subdirectory of the source directory ${rootDir.path}');
+        'configured output_dir ${outDir.path} is not a '
+        'subdirectory of the source directory ${rootDir.path}',
+      );
     }
 
     var prefix = '';
@@ -138,33 +155,46 @@ class CodeBuilder extends Builder {
     return prefix;
   }
 
-  void updateCode(ModelInfo model, List<String> infoFiles, BuildStep buildStep,
-      BuilderDirs builderDirs, Pubspec? pubspec) async {
+  void updateCode(
+    ModelInfo model,
+    List<String> infoFiles,
+    BuildStep buildStep,
+    BuilderDirs builderDirs,
+    Pubspec? pubspec,
+  ) async {
     var prefix = getPrefixFor(builderDirs);
     if (prefix == null) {
       log.warning(
-          'Failed to find package root from output directory, generated imports might be incorrect (rootDir="${builderDirs.root}", outDir="${builderDirs.out}")');
+        'Failed to find package root from output directory, generated imports might be incorrect (rootDir="${builderDirs.root}", outDir="${builderDirs.out}")',
+      );
     } else if (prefix.isNotEmpty) {
       log.info(
-          'Output directory not in package root, adding prefix to imports: $prefix');
+        'Output directory not in package root, adding prefix to imports: $prefix',
+      );
     }
 
     // transform '/lib/path/entity.objectbox.info' to 'path/entity.dart'
-    final imports = infoFiles
-        .map((file) => file
-            .replaceFirst(EntityResolver.suffix, '.dart')
-            .replaceFirst('${builderDirs.root}/', prefix ?? ''))
-        .toList();
+    final imports =
+        infoFiles
+            .map(
+              (file) => file
+                  .replaceFirst(EntityResolver.suffix, '.dart')
+                  .replaceFirst('${builderDirs.root}/', prefix ?? ''),
+            )
+            .toList();
 
     var code = CodeChunks.objectboxDart(model, imports, pubspec);
 
     try {
-      code = DartFormatter(languageVersion: DartFormatter.latestLanguageVersion)
-          .format(code);
+      code = DartFormatter(
+        languageVersion: DartFormatter.latestLanguageVersion,
+      ).format(code);
     } finally {
       // Write the code even after a formatter error so it's easier to debug.
       final codeId = AssetId(
-          buildStep.inputId.package, '${builderDirs.out}/${_config.codeFile}');
+        buildStep.inputId.package,
+        '${builderDirs.out}/${_config.codeFile}',
+      );
       log.info('Generating code: ${codeId.path}');
       await buildStep.writeAsString(codeId, code);
     }
@@ -182,10 +212,11 @@ class CodeBuilder extends Builder {
     model.entities
         .where((entity) => !currentEntityIds.contains(entity.id.id))
         .forEach((entity) {
-      log.warning(
-          'Entity ${entity.name}(${entity.id}) not found in the code, removing from the model');
-      model.removeEntity(entity);
-    });
+          log.warning(
+            'Entity ${entity.name}(${entity.id}) not found in the code, removing from the model',
+          );
+          model.removeEntity(entity);
+        });
   }
 
   void mergeProperty(ModelEntity entityInModel, ModelProperty prop) {
@@ -195,13 +226,18 @@ class CodeBuilder extends Builder {
       log.info('Found new property ${entityInModel.name}.${prop.name}');
       if (prop.uidRequest) {
         throw ArgumentError(
-            'Property ${prop.name} UID is specified explicitly with a zero value on a new property.'
-            "If you're adding a new property, remove the `uid` argument");
+          'Property ${prop.name} UID is specified explicitly with a zero value on a new property.'
+          "If you're adding a new property, remove the `uid` argument",
+        );
       }
       propInModel = entityInModel.createProperty(prop.name, prop.id.uid);
     } else if (prop.uidRequest) {
       handleUidRequest(
-          'Property', prop.name, propInModel.id, entityInModel.model);
+        'Property',
+        prop.name,
+        propInModel.id,
+        entityInModel.model,
+      );
     }
 
     // update the source object so we don't get removed as a missing property
@@ -211,8 +247,12 @@ class CodeBuilder extends Builder {
     propInModel.type = prop.type;
     propInModel.flags = prop.flags;
     propInModel.dartFieldType = prop.dartFieldType;
+    propInModel.relationField = prop.relationField;
     propInModel.relationTarget = prop.relationTarget;
     propInModel.hnswParams = prop.hnswParams;
+    propInModel.externalName = prop.externalName;
+    propInModel.externalType = prop.externalType;
+    propInModel.dartType = prop.dartType;
 
     if (!prop.hasIndexFlag()) {
       propInModel.removeIndex();
@@ -228,13 +268,18 @@ class CodeBuilder extends Builder {
       log.info('Found new relation ${entityInModel.name}.${rel.name}');
       if (rel.uidRequest) {
         throw ArgumentError(
-            'Relation ${rel.name} UID is specified explicitly with a zero value on a new relation.'
-            "If you're adding a new rel, remove the `uid` argument");
+          'Relation ${rel.name} UID is specified explicitly with a zero value on a new relation.'
+          "If you're adding a new rel, remove the `uid` argument",
+        );
       }
       relInModel = entityInModel.createRelation(rel.name, rel.id.uid);
     } else if (rel.uidRequest) {
       handleUidRequest(
-          'Property', rel.name, relInModel.id, entityInModel.model);
+        'Property',
+        rel.name,
+        relInModel.id,
+        entityInModel.model,
+      );
     }
 
     // update the source object so we don't get removed as a missing property
@@ -242,6 +287,8 @@ class CodeBuilder extends Builder {
 
     relInModel.name = rel.name;
     relInModel.targetName = rel.targetName;
+    relInModel.externalName = rel.externalName;
+    relInModel.externalType = rel.externalType;
   }
 
   IdUid mergeEntity(ModelInfo modelInfo, ModelEntity entity) {
@@ -253,8 +300,9 @@ class CodeBuilder extends Builder {
       log.info('Found new entity ${entity.name}');
       if (entity.uidRequest) {
         throw ArgumentError(
-            'Entity ${entity.name} UID is specified explicitly with a zero value on a new entity.'
-            "If you're adding a new entity, remove the `uid` argument");
+          'Entity ${entity.name} UID is specified explicitly with a zero value on a new entity.'
+          "If you're adding a new entity, remove the `uid` argument",
+        );
       }
       // in case the entity is created (i.e. when its given UID or name that does not yet exist), we are done, as nothing needs to be merged
       entityInModel = modelInfo.createEntity(entity.name, entity.id.uid);
@@ -267,6 +315,7 @@ class CodeBuilder extends Builder {
 
     entityInModel.name = entity.name;
     entityInModel.flags = entity.flags;
+    entityInModel.externalName = entity.externalName;
     entityInModel.constructorParams = entity.constructorParams;
 
     // here, the entity was found already and entityInModel and entity might differ, i.e. conflicts need to be resolved, so merge all properties first
@@ -284,7 +333,8 @@ class CodeBuilder extends Builder {
 
     for (var p in missingProps) {
       log.warning(
-          'Property ${entity.name}.${p.name}(${p.id}) not found in the code, removing from the model');
+        'Property ${entity.name}.${p.name}(${p.id}) not found in the code, removing from the model',
+      );
       entityInModel.removeProperty(p);
     }
 
@@ -295,7 +345,8 @@ class CodeBuilder extends Builder {
 
     for (var p in missingRels) {
       log.warning(
-          'Relation ${entity.name}.${p.name}(${p.id}) not found in the code, removing from the model');
+        'Relation ${entity.name}.${p.name}(${p.id}) not found in the code, removing from the model',
+      );
       entityInModel.removeRelation(p);
     }
 
@@ -314,11 +365,15 @@ class CodeBuilder extends Builder {
         final targetEntity = model.findEntityByName(rel.targetName);
         if (targetEntity == null) {
           throw InvalidGenerationSourceError(
-              "entity ${entity.name} relation ${rel.name}: cannot find target entity '${rel.targetName}");
+            "entity ${entity.name} relation ${rel.name}: cannot find target entity '${rel.targetName}",
+          );
         }
         rel.targetId = targetEntity.id;
       }
-
+    }
+    // Note: finding the backlink source requires that all ToMany relations have
+    // a targetId set, so find backlink sources in a separate loop.
+    for (var entity in model.entities) {
       for (var backlink in entity.backlinks) {
         backlink.source = _findBacklinkSource(model, entity, backlink);
       }
@@ -330,43 +385,69 @@ class CodeBuilder extends Builder {
   /// Otherwise, tries to find a match by type (to-one) or entity ID (to-many).
   /// Throws if there are multiple matches or no match.
   BacklinkSource _findBacklinkSource(
-      ModelInfo model, ModelEntity entity, ModelBacklink bl) {
+    ModelInfo model,
+    ModelEntity entity,
+    ModelBacklink bl,
+  ) {
     final srcEntity = model.findEntityByName(bl.srcEntity);
     if (srcEntity == null) {
       throw InvalidGenerationSourceError(
-          "Invalid relation backlink '${entity.name}.${bl.name}': cannot find source entity '${bl.srcEntity}'");
+        "Invalid relation backlink '${entity.name}.${bl.name}': cannot find source entity '${bl.srcEntity}'",
+      );
     }
 
     // either of these will be set, based on the source field that matches
     ModelRelation? srcRel;
     ModelProperty? srcProp;
 
-    throwAmbiguousError(String prop, String rel) =>
-        throw InvalidGenerationSourceError(
-            "Ambiguous relation backlink source for '${entity.name}.${bl.name}':"
-            " Found matching property '$prop' and to-many relation '$rel'."
-            " Maybe specify source name in @Backlink() annotation.");
+    throwAmbiguousError(
+      Iterable<ModelProperty> toOneProps,
+      Iterable<ModelRelation> toManyRels,
+    ) {
+      final toOneList = toOneProps.map((p) => p.relationField);
+      final toManyList = toManyRels.map((r) => r.name);
+      final fieldList = [...toOneList, ...toManyList].join(', ');
+      throw InvalidGenerationSourceError(
+        "Can't determine backlink source for \"${entity.name}.${bl.name}\" "
+        "as there is more than one matching ToOne or ToMany relation in \"${srcEntity.name}\": $fieldList."
+        " Add the name of the source relation to the annotation, like @Backlink('<source>'), or modify your entity classes.",
+      );
+    }
 
+    // Note that in the model only the target ID (or relation) property of a
+    // ToOne exists, so search for that.
     if (bl.srcField.isEmpty) {
-      final matchingProps = srcEntity.properties
-          .where((p) => p.isRelation && p.relationTarget == entity.name);
-      final matchingRels =
-          srcEntity.relations.where((r) => r.targetId == entity.id);
+      // No source field name given, try to find the source relation by type of
+      // its target entity.
+      final matchingProps = srcEntity.properties.where(
+        (p) => p.isRelation && p.relationTarget == entity.name,
+      );
+      final matchingRels = srcEntity.relations.where(
+        (r) => r.targetId == entity.id,
+      );
       final candidatesCount = matchingProps.length + matchingRels.length;
       if (candidatesCount > 1) {
-        throwAmbiguousError(matchingProps.toString(), matchingRels.toString());
+        throwAmbiguousError(matchingProps, matchingRels);
       } else if (matchingProps.isNotEmpty) {
         srcProp = matchingProps.first;
       } else if (matchingRels.isNotEmpty) {
         srcRel = matchingRels.first;
       }
     } else {
-      srcProp = srcEntity.findPropertyByName('${bl.srcField}Id');
-      srcRel =
-          srcEntity.relations.firstWhereOrNull((r) => r.name == bl.srcField);
+      // Source field name given
+      // For ToOne, expect the name of the ToOne field
+      srcProp = srcEntity.properties.firstWhereOrNull(
+        (p) => p.isRelation && p.relationField == bl.srcField,
+      );
+      // For ToMany, expect the name of the ToMany field
+      srcRel = srcEntity.relations.firstWhereOrNull(
+        (r) => r.name == bl.srcField,
+      );
 
+      // This should be impossible as it would mean a ToOne and a ToMany field
+      // share the same name, but check just in case.
       if (srcProp != null && srcRel != null) {
-        throwAmbiguousError(srcProp.toString(), srcRel.toString());
+        throwAmbiguousError([srcProp], [srcRel]);
       }
     }
 
@@ -376,13 +457,19 @@ class CodeBuilder extends Builder {
       return BacklinkSourceProperty(srcProp);
     } else {
       throw InvalidGenerationSourceError(
-          "Unknown relation backlink source for '${entity.name}.${bl.name}'");
+        'Failed to find backlink source for "${entity.name}.${bl.name}" in "${srcEntity.name}", '
+        'make sure a matching ToOne or ToMany relation exists.',
+      );
     }
   }
 }
 
 Never handleUidRequest(
-        String annotationName, String name, IdUid currentId, ModelInfo model) =>
+  String annotationName,
+  String name,
+  IdUid currentId,
+  ModelInfo model,
+) =>
     throw InvalidGenerationSourceError('''
     @$annotationName(uid: 0) found on "$name" - you can choose one of the following actions:
       [Rename] apply the current UID using @$annotationName(uid: ${currentId.uid})
