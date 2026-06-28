@@ -449,7 +449,7 @@ class CodeChunks {
   }) {
     return readFieldCodeString(
       p,
-      "fb.ListReader<$itemType>(fb.${_propertyFlatBuffersType[obxPropertyType]}Reader(), lazy: false)",
+      "$obx.ListReader<$itemType>($obx.${_propertyFlatBuffersType[obxPropertyType]}Reader(), lazy: false)",
       defaultValue: defaultValue,
       castTo: castTo,
     );
@@ -493,7 +493,7 @@ class CodeChunks {
           if (p.fieldType == 'DateTime') {
             final readCodeString = readFieldCodeString(
               p,
-              'fb.${_propertyFlatBuffersType[p.type]}Reader()',
+              '$obx.${_propertyFlatBuffersType[p.type]}Reader()',
               defaultValue: '0',
             );
             final isUtcArg = p.isDateUtc ? ', isUtc: true' : '';
@@ -524,7 +524,7 @@ class CodeChunks {
                 // uses it, see Int8ListReader and Uint8ListReader.
                 return readFieldCodeString(
                   p,
-                  'fb.${p.fieldType}Reader(lazy: false)',
+                  '$obx.${p.fieldType}Reader(lazy: false)',
                   castTo: p.fieldType,
                 );
               } else {
@@ -575,7 +575,7 @@ class CodeChunks {
             case OBXPropertyType.Relation:
               return readFieldCodeString(
                 p,
-                'fb.${_propertyFlatBuffersType[p.type]}Reader()',
+                '$obx.${_propertyFlatBuffersType[p.type]}Reader()',
                 defaultValue: '0',
               );
             case OBXPropertyType.String:
@@ -583,14 +583,14 @@ class CodeChunks {
               // `readAll` faster(6.1ms) than when false(8.1ms) on Flutter 3.0.1, Dart 2.17.1
               return readFieldCodeString(
                 p,
-                'fb.StringReader(asciiOptimization: true)',
+                '$obx.StringReader(asciiOptimization: true)',
               );
             case OBXPropertyType.StringVector:
               // still makes sense to keep `asciiOptimization: true`
               // `readAll` faster(6.1ms) than when false(8.1ms) on Flutter 3.0.1, Dart 2.17.1
               return readFieldCodeString(
                 p,
-                'fb.ListReader<String>(fb.StringReader(asciiOptimization: true), lazy: false)',
+                '$obx.ListReader<String>($obx.StringReader(asciiOptimization: true), lazy: false)',
               );
             case OBXPropertyType.Flex:
               // Read as Uint8List and convert to Map, List, or value
@@ -667,7 +667,7 @@ class CodeChunks {
             default:
               return readFieldCodeString(
                 p,
-                'fb.${_propertyFlatBuffersType[p.type]}Reader()',
+                '$obx.${_propertyFlatBuffersType[p.type]}Reader()',
               );
           }
         })
