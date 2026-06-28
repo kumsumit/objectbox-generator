@@ -28,10 +28,9 @@ class ObjectBoxAnalysis {
   final String _tokenFilePath;
 
   ObjectBoxAnalysis({
-    bool debug = false,
+    this._debug = false,
     String tokenFilePath = defaultTokenFilePath,
-  }) : _debug = debug,
-       _tokenFilePath = tokenFilePath;
+  }) : _tokenFilePath = tokenFilePath;
 
   /// Builds a Build event and sends it with [sendEvent]. May not send if it
   /// fails to store a unique identifier and last time sent, or if no valid API
